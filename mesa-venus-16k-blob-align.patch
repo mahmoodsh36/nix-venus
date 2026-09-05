@@ -1,0 +1,32 @@
+From: osy <osy@turing.llc>
+Subject: [PATCH] DO NOT MERGE: venus: hack to align mappings to 16KiB
+
+Rebased onto mesa 26.2 (upstream added the `batch` parameter to
+virtgpu_ioctl_resource_create_blob and moved the call sites).
+
+--- a/src/virtio/vulkan/vn_renderer_virtgpu.c
++++ b/src/virtio/vulkan/vn_renderer_virtgpu.c
+@@ -22,6 +22,7 @@
+ #include "drm-uapi/virtgpu_drm.h"
+ #include "util/os_file.h"
+ #include "util/sparse_array.h"
++#include "util/u_math.h"
+ #include "util/u_sync_provider.h"
+
+ #include "vn_renderer_internal.h"
+@@ -641,6 +642,7 @@ virtgpu_bo_create_from_device_memory(
+       virtgpu_bo_blob_flags(gpu, flags, external_handles);
+
+    uint32_t res_id;
++   size = align64(size, 0x4000); // FIXME: host 16KiB pages
+    uint32_t gem_handle = virtgpu_ioctl_resource_create_blob(
+       gpu, batch, gpu->bo_blob_mem, blob_flags, size, mem_id, &res_id);
+    if (!gem_handle)
+@@ -726,6 +728,7 @@ virtgpu_shmem_create(struct vn_renderer *renderer, size_t size)
+    }
+
+    uint32_t res_id;
++   size = align64(size, 0x4000); // FIXME: host 16KiB pages
+    uint32_t gem_handle = virtgpu_ioctl_resource_create_blob(
+       gpu, NULL, gpu->shmem_blob_mem, VIRTGPU_BLOB_FLAG_USE_MAPPABLE, size, 0,
+       &res_id);

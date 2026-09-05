@@ -1,0 +1,25 @@
+diff --git a/ui/spice-display.c b/ui/spice-display.c
+--- a/ui/spice-display.c
++++ b/ui/spice-display.c
+@@ -1766,5 +1766,21 @@ void qemu_spice_display_init(void)
+         qemu_spice_display_init_one(con);
+     }
+
++#if defined(HAVE_SPICE_GL) && defined(CONFIG_EGL)
++    /*
++     * qemu_spice_display_early_init() created the EGL context on this
++     * (process main) thread, and qemu_spice_display_init_one() just used
++     * it to compile shaders via qemu_gl_init_shader().  But spice_gl_refresh
++     * runs on the qemu_main_loop thread (qemu_default_main pthread), and
++     * ANGLE/Metal returns EGL_BAD_ACCESS for eglMakeCurrent there while the
++     * context is still bound to *this* thread.  Release it so the worker
++     * thread can claim it.
++     */
++    if (spice_opengl == DISPLAY_GL_MODE_ES && qemu_egl_display) {
++        eglMakeCurrent(qemu_egl_display, EGL_NO_SURFACE,
++                       EGL_NO_SURFACE, EGL_NO_CONTEXT);
++    }
++#endif
++
+     qemu_spice_display_init_done();
+ }
