@@ -1,0 +1,92 @@
+Map virtio-gpu blob subregions on host-page-aligned supersets.
+
+Large-page hosts (Apple Silicon, 16K) refuse IPA mappings whose offset
+or size is not a host-page multiple, but the guest packs blob BAR offsets
+at 4K granularity and blob sizes are arbitrary. The result is a refused
+mapping ("Cannot add ... not aligned to page size") and a stage-2 hole
+that faults the guest on first touch.
+
+Map [ALIGN_DOWN(offset), ALIGN_UP(size + head)) backed by (data - head)
+instead. The guest only ever touches [offset, offset + size), which stays
+backed by the exact same host bytes; the head/tail padding is never
+guest-visible (the guest sizes its own mmaps from its drm_mm node, not
+from our subregion). Unmap is unchanged: it deletes the stored MR by
+handle. Already-aligned blobs map exactly as before.
+
+The extension is applied only if every host page it adds is actually
+mapped (mincore probe), so a short host allocation can never turn a
+refused mapping into a fatal hv_vm_map. Any probe failure keeps the
+exact mapping, i.e. current behavior.
+
+Covers the virgl path only (rutabaga has its own mapper). Applies to
+both qemu-venus (submit/macos-venus) and qemu-venus-spice
+(utm-edition @ 9f81c62): the function is identical in both.
+
+diff --git a/hw/display/virtio-gpu-virgl.c b/hw/display/virtio-gpu-virgl.c
+index f8241c8ac9..b055f65d63 100644
+--- a/hw/display/virtio-gpu-virgl.c
++++ b/hw/display/virtio-gpu-virgl.c
+@@ -95,6 +95,32 @@ static void virtio_gpu_virgl_hostmem_region_free(void *obj)
+     qemu_bh_schedule(gl->cmdq_resume_bh);
+ }
+ 
++#ifndef _WIN32
++#include <sys/mman.h>
++#endif
++
++static bool
++virtio_gpu_virgl_host_range_mapped(void *addr, uint64_t len)
++{
++#ifndef _WIN32
++    /*
++     * mincore() reports whole host pages; over-probing the edges is
++     * harmless. Any failure (unmapped page, odd host memory, ...) just
++     * keeps the exact mapping, i.e. current behavior.
++     */
++    uint64_t ps = qemu_real_host_page_size();
++    uintptr_t start = QEMU_ALIGN_DOWN((uintptr_t)addr, ps);
++    uintptr_t end = QEMU_ALIGN_UP((uintptr_t)addr + len, ps);
++    size_t n = (end - start) / ps;
++    void *vec = g_malloc(n);
++    bool ok = mincore((void *)start, end - start, vec) == 0;
++    g_free(vec);
++    return ok;
++#else
++    return true;
++#endif
++}
++
+ static int
+ virtio_gpu_virgl_map_resource_blob(VirtIOGPU *g,
+                                    struct virtio_gpu_virgl_resource *res,
+@@ -122,6 +148,30 @@ virtio_gpu_virgl_map_resource_blob(VirtIOGPU *g,
+     vmr = g_new0(struct virtio_gpu_virgl_hostmem_region, 1);
+     vmr->g = g;
+ 
++    /*
++     * Large-page hosts only map IPA ranges with host-page-aligned offset
++     * and size. Map a host-page-aligned superset instead; the guest's own
++     * [offset, offset + size) window stays backed by the same host data.
++     */
++    {
++        uint64_t ps = qemu_real_host_page_size();
++        uint64_t off_a = QEMU_ALIGN_DOWN(offset, ps);
++        uint64_t head = offset - off_a;
++        uint64_t size_a = QEMU_ALIGN_UP(size + head, ps);
++
++        if ((off_a != offset || size_a != size) &&
++            virtio_gpu_virgl_host_range_mapped((char *)data - head,
++                                               size_a)) {
++            warn_report_once("virtio-gpu: blob resource %u IPA "
++                             "0x%" PRIx64 "+0x%" PRIx64 " is not host-page "
++                             "aligned; mapping superset instead",
++                             res->base.resource_id, offset, size);
++            data = (char *)data - head;
++            offset = off_a;
++            size = size_a;
++        }
++    }
++
+     mr = &vmr->mr;
+     memory_region_init_ram_ptr(mr, OBJECT(mr), NULL, size, data);
+     memory_region_add_subregion(&b->hostmem, offset, mr);

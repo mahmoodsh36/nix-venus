@@ -1,0 +1,29 @@
+--- a/target/arm/hvf/hvf.c
++++ b/target/arm/hvf/hvf.c
+@@ -1928,7 +1928,25 @@
+             break;
+         }
+ 
+-        assert(isv);
++        if (!isv) {
++            /*
++             * ISV=0 carries no valid ISS, so there is nothing to emulate
++             * (stage-2 hole from a blob hvf_set_phys_mem refused as
++             * unaligned to the 16K host page, S1PTW, or SIMD/SVE access).
++             * Inject the abort into the guest instead of aborting the host.
++             * Written without hvf_raise_exception so it applies to both the
++             * submit/macos-venus (4-arg) and utm-edition (3-arg) trees.
++             */
++            cpu_synchronize_state(cpu);
++            error_report("hvf: data abort with ISV=0, syndrome 0x%llx; "
++                         "injecting guest abort instead of aborting",
++                         (unsigned long long)syndrome);
++            cpu->exception_index = EXCP_DATA_ABORT;
++            env->exception.target_el = 1;
++            env->exception.syndrome = (uint32_t)syndrome;
++            arm_cpu_do_interrupt(cpu);
++            break;
++        }
+ 
+         if (iswrite) {
+             val = hvf_get_reg(cpu, srt);

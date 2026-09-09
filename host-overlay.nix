@@ -181,6 +181,10 @@ in {
     rev           = "f714f0e3370e8b4858a249ebaf6522f19b2fd97f";
     srcHash       = "sha256-6SYMl/5K4WweAAkIvoUB+DVdFpq7r+2CR1LzbDXLMDo=";
     versionSuffix = "10.0.2-utm";
+    # ISV=0 data abort (unaligned blob hole) must not abort the host.
+    # Blob IPA mappings are aligned to the host page in a superset so
+    # large-page hosts accept them (general fix, all apps).
+    extraPatches  = [ ./hvf-isv0-guard.patch ./virtio-gpu-blob-16k-align.patch ];
   };
 
   # Console launcher (spice IOSurface, no NSWindow). Tracks the utmapp
@@ -196,6 +200,6 @@ in {
     rev           = "9f81c6232fbb3ea1d9e43cb67fe5e029723d2ed5";
     srcHash       = "sha256-pRyx6v1Ult0XptyLXh4sgCGnC5EM3HGhotsyI9W0bMo=";
     versionSuffix = "10.0.2-utm-edition";
-    extraPatches  = [ ./spice-thread-fix.patch ];
+    extraPatches  = [ ./spice-thread-fix.patch ./hvf-isv0-guard.patch ./virtio-gpu-blob-16k-align.patch ];
   };
 }
