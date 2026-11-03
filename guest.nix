@@ -62,6 +62,12 @@ in {
       description = "Guest hostname.";
     };
 
+    hostUid = mkOption {
+      type        = types.nullOr types.int;
+      default     = 501;
+      description = "Host uid owning the /data share, given to the guest user (501 is the first macOS user). null keeps the NixOS default.";
+    };
+
     stateVersion = mkOption {
       type        = types.str;
       default     = "25.05";
@@ -105,8 +111,7 @@ in {
     };
 
     # Host voldir shared as 9p. mkForce because disko declares /data as
-    # btrfs; host UIDs pass through, so write as root. nofail keeps boot
-    # working without the matching -virtfs.
+    # btrfs. nofail keeps boot working without the matching -virtfs.
     fileSystems."/data" = mkForce {
       device  = "host-data";
       fsType  = "9p";
@@ -117,7 +122,32 @@ in {
     systemd.tmpfiles.rules = [
       "L+ /home/${config.machine.user}/work - - - - /data/work"
       "L+ /home/${config.machine.user}/brain - - - - /data/brain"
+      "L+ /home/${config.machine.user}/data - - - - /data/data"
     ];
+
+    # 9p shows host uids and the guest checks modes against them. isNormalUser
+    # forbids uids below 1000, so its settings are spelled out.
+    users.users.${config.machine.user} = mkIf (cfg.hostUid != null) {
+      uid             = cfg.hostUid;
+      isNormalUser    = mkForce false;
+      group           = mkDefault "users";
+      createHome      = mkDefault true;
+      home            = mkDefault "/home/${config.machine.user}";
+      homeMode        = mkDefault "700";
+      useDefaultShell = mkDefault true;
+    };
+
+    # The users step never changes an existing uid, so migrate older disks first.
+    system.activationScripts.users.deps = mkIf (cfg.hostUid != null) [ "venusHostUid" ];
+    system.activationScripts.venusHostUid = mkIf (cfg.hostUid != null) {
+      deps = [ "specialfs" ];
+      text = ''
+        old=$(${pkgs.coreutils}/bin/id -u ${config.machine.user} 2>/dev/null || true)
+        if [ -n "$old" ] && [ "$old" != ${toString cfg.hostUid} ]; then
+          ${pkgs.shadow}/bin/usermod -u ${toString cfg.hostUid} ${config.machine.user}
+        fi
+      '';
+    };
 
     # Overlayfs over the squashfs lower: nix-daemon dies on a read only
     # store. Upper is tmpfs, so new store paths are lost on reboot.
