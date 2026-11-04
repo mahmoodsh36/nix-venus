@@ -78,12 +78,9 @@ in {
   config = mkIf cfg.enable {
     nixpkgs.overlays = [ guestOverlay ];
 
-    # Legacy initrd. systemd in initrd plus make-disk-image emit a
-    # duplicate sysroot.mount and drop to emergency mode. Bootloaders stay
-    # off since the launcher boots through qemu -kernel and -initrd directly.
+    # Bootloaders stay off: the launcher boots through qemu -kernel and -initrd directly.
     boot.loader.grub.enable         = mkForce false;
     boot.loader.systemd-boot.enable = mkForce false;
-    boot.initrd.systemd.enable      = false;
     boot.initrd.availableKernelModules = [
       "virtio_pci" "virtio_blk" "virtio_net" "virtio_gpu"
       "drm" "drm_kms_helper"
