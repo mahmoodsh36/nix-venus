@@ -3,7 +3,7 @@
 # qemu-vm.nix is Linux host only and tightly coupled to the vmVariant
 # runner, so we lift only the patterns we need. Overlayfs /nix/store on a
 # 9p read only lower plus tmpfs upper, ext4 scratch root with autoResize,
-# /tmp on tmpfs, legacy initrd, aarch64 ttyAMA0 console, regInfo driven nix
+# /tmp on tmpfs, aarch64 ttyAMA0 console, regInfo driven nix
 # db registration. See ./venus.nix for the launcher.
 
 { config, lib, pkgs, modulesPath, ... }:
@@ -167,6 +167,25 @@ in {
         workdir  = "/nix/.rw-store/work";
       };
       neededForBoot = true;
+    };
+
+    # The store image only holds the current closure, so a persistent root
+    # disk keeps /etc/static pointing at a vanished etc and switch-root
+    # rejects /sysroot for lacking os-release. Repoint it before that check.
+    boot.initrd.systemd.services.venus-etc-static = {
+      description = "Point /etc/static at the booted closure";
+      after       = [ "initrd-nixos-activation.service" ];
+      before      = [ "initrd-switch-root.service" ];
+      requiredBy  = [ "initrd-switch-root.service" ];
+      unitConfig.DefaultDependencies = false;
+      serviceConfig.Type = "oneshot";
+      script = ''
+        export PATH=/bin
+        closure=$(readlink /nixos-closure) || exit 0
+        etc=$(readlink "/sysroot$closure/etc") || exit 0
+        mkdir -p /sysroot/etc
+        ln -sfn "$etc" /sysroot/etc/static
+      '';
     };
 
     # Lifted from qemu-vm.nix. Loads the regInfo file (passed on the kernel

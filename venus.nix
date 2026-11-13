@@ -203,7 +203,7 @@ let
         -cpu host -smp 4 -m 8G
         -kernel ${guestKernelImg}
         -initrd ${guestInitrd}/initrd
-        -append "console=ttyAMA0,115200 root=/dev/vda init=${guestToplevel}/init regInfo=${guestClosureInfo}/registration loglevel=4"
+        -append "console=ttyAMA0,115200 init=${guestToplevel}/init regInfo=${guestClosureInfo}/registration loglevel=4"
         # Keeps block I/O off the main loop, which also serves 9p and net.
         -object iothread,id=iothread0
         -blockdev driver=file,node-name=disk-file,filename="$DISK"
